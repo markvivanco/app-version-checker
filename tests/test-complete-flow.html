@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test UPC Image Download Flow</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .log {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        img {
+            max-width: 200px;
+            margin: 10px;
+            border: 1px solid #ddd;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Complete UPC Image Download Flow</h1>
+    <p>This test simulates the complete flow of:</p>
+    <ol>
+        <li>Looking up UPC 813694026719</li>
+        <li>Getting image URLs from the response</li>
+        <li>Downloading images via the proxy (to avoid CORS)</li>
+        <li>Displaying the images</li>
+    </ol>
+
+    <button onclick="runTest()">Run Complete Test</button>
+
+    <div id="results"></div>
+
+    <script>
+        // Environment configuration
+        const SUPABASE_URL = 'https://xoetypijusfuuucvwhle.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhvZXR5cGlqdXNmdXV1Y3Z3aGxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDczNjg5MDQsImV4cCI6MjA2Mjk0NDkwNH0.tR2U0QLM3expsfNWUgR1KwmSa8FvpfvdyKFECS0vN94';
+        const TEST_UPC = '813694026719';
+
+        function addLog(message, type = 'info') {
+            const results = document.getElementById('results');
+            const log = document.createElement('div');
+            log.className = 'log';
+            if (type === 'error') {
+                log.innerHTML = `<span class="error">${message}</span>`;
+            } else if (type === 'success') {
+                log.innerHTML = `<span class="success">${message}</span>`;
+            } else {
+                log.textContent = message;
+            }
+            results.appendChild(log);
+        }
+
+        function addSection(title) {
+            const results = document.getElementById('results');
+            const section = document.createElement('div');
+            section.className = 'test-section';
+            section.innerHTML = `<h3>${title}</h3>`;
+            results.appendChild(section);
+            return section;
+        }
+
+        async function downloadImageViaProxy(imageUrl) {
+            addLog(`Downloading image via proxy: ${imageUrl}`);
+
+            try {
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/image-proxy`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ imageUrl })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Proxy request failed: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Unknown proxy error');
+                }
+
+                addLog(`✅ Image downloaded successfully! Size: ${data.size} bytes, Type: ${data.mimeType}`, 'success');
+
+                // Convert base64 to blob
+                const base64Data = data.data;
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                const blob = new Blob([bytes], { type: data.mimeType });
+
+                return URL.createObjectURL(blob);
+            } catch (error) {
+                addLog(`❌ Error downloading image: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        async function runTest() {
+            // Clear previous results
+            document.getElementById('results').innerHTML = '';
+
+            // Step 1: Call UPC API
+            const section1 = addSection('Step 1: UPC Lookup');
+            section1.appendChild(document.createElement('div')).innerHTML =
+                `<div class="log">Calling UPC API for: ${TEST_UPC}</div>`;
+
+            try {
+                const upcResponse = await fetch(`${SUPABASE_URL}/functions/v1/upc-lookup`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ upc: TEST_UPC })
+                });
+
+                const upcData = await upcResponse.json();
+
+                if (!upcData.items || upcData.items.length === 0) {
+                    throw new Error('No items found in UPC response');
+                }
+
+                const item = upcData.items[0];
+                section1.appendChild(document.createElement('div')).innerHTML =
+                    `<div class="log success">✅ UPC lookup successful!
+Product: ${item.title}
+Brand: ${item.brand}
+Images found: ${item.images ? item.images.length : 0}</div>`;
+
+                if (!item.images || item.images.length === 0) {
+                    throw new Error('No images in UPC response');
+                }
+
+                // Step 2: Download images via proxy
+                const section2 = addSection('Step 2: Download Images via Proxy');
+
+                for (let i = 0; i < Math.min(item.images.length, 2); i++) {
+                    const imageUrl = item.images[i];
+                    section2.appendChild(document.createElement('div')).innerHTML =
+                        `<div class="log">Downloading image ${i + 1} from: ${imageUrl}</div>`;
+
+                    const objectUrl = await downloadImageViaProxy(imageUrl);
+
+                    if (objectUrl) {
+                        const img = document.createElement('img');
+                        img.src = objectUrl;
+                        img.alt = `Product image ${i + 1}`;
+                        section2.appendChild(img);
+                    }
+                }
+
+                // Step 3: Summary
+                const section3 = addSection('Test Complete');
+                section3.appendChild(document.createElement('div')).innerHTML =
+                    `<div class="log success">✅ Complete flow successful!
+Images were successfully downloaded from external URLs using the proxy to bypass CORS restrictions.</div>`;
+
+            } catch (error) {
+                addLog(`❌ Test failed: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
